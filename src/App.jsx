@@ -5,19 +5,22 @@ import CompressionSettings from './components/CompressionSettings';
 import FileCard from './components/FileCard';
 import ResultCard from './components/ResultCard';
 import StatsBanner from './components/StatsBanner';
+import { compressPdfWithBackend, DEFAULT_BACKEND_URL } from './api/compressService';
 import { 
   FileText, 
   Zap, 
   ArrowRight, 
-  Sparkles, 
-  CheckCircle2, 
-  Plus, 
-  Layers,
-  FileCheck2
+  AlertCircle, 
+  Server, 
+  RefreshCw,
+  SlidersHorizontal,
+  CheckCircle2
 } from 'lucide-react';
 
 export default function App() {
   const [files, setFiles] = useState([]);
+  const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
+  const [showServerConfig, setShowServerConfig] = useState(false);
   const [settings, setSettings] = useState({
     preset: 'balanced',
     quality: 75,
@@ -26,9 +29,9 @@ export default function App() {
     grayscale: false,
   });
 
-  const [status, setStatus] = useState('idle'); // 'idle' | 'compressing' | 'completed'
-  const [progress, setProgress] = useState(0);
-  const [currentStage, setCurrentStage] = useState('');
+  const [status, setStatus] = useState('idle'); // 'idle' | 'compressing' | 'completed' | 'error'
+  const [currentFileIndex, setCurrentFileIndex] = useState(0);
+  const [errorMessage, setErrorMessage] = useState('');
   const [results, setResults] = useState([]);
 
   const handleFilesSelected = (newFiles) => {
@@ -38,78 +41,49 @@ export default function App() {
     }));
     setFiles((prev) => [...prev, ...fileItems]);
     setStatus('idle');
+    setErrorMessage('');
   };
 
   const handleRemoveFile = (id) => {
     setFiles((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const handleLoadSample = () => {
-    // Generate a dummy PDF file for instant testing
-    const sampleContent = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length 44 >>\nstream\nBT /F1 24 Tf 100 700 Td (Pdf Compressor Sample) Tj ET\nendstream\nendobj\nxref\n0 5\n0000000000 65535 f \n0000000010 00000 n \n0000000060 00000 n \n0000000117 00000 n \n0000000214 00000 n \ntrailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n308\n%%EOF";
-    // Create a 4.2 MB mock blob
-    const largeMock = new Uint8Array(4.2 * 1024 * 1024);
-    const sampleFile = new File([sampleContent, largeMock], 'sample_annual_report.pdf', {
-      type: 'application/pdf',
-    });
-
-    setFiles([
-      {
-        id: 'sample-1',
-        file: sampleFile,
-      },
-    ]);
-    setStatus('idle');
-  };
-
   const startCompression = async () => {
     if (files.length === 0) return;
 
     setStatus('compressing');
-    setProgress(5);
-    setCurrentStage('Parsing PDF catalog and object streams...');
+    setErrorMessage('');
+    setCurrentFileIndex(0);
 
-    const stages = [
-      { pct: 25, label: 'Scanning for embedded PDImageXObject images...' },
-      { pct: 55, label: `Downsampling images to ${settings.dpi} DPI (Quality ${settings.quality}%)...` },
-      { pct: 75, label: 'Recompressing FlateDecode streams and removing redundant metadata...' },
-      { pct: 90, label: 'Building optimized cross-reference tables (PDFBox 3.0)...' },
-      { pct: 100, label: 'Finalizing compressed document output!' },
-    ];
+    const processedResults = [];
 
-    for (const stage of stages) {
-      await new Promise((r) => setTimeout(r, 650));
-      setProgress(stage.pct);
-      setCurrentStage(stage.label);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        setCurrentFileIndex(i);
+        const item = files[i];
+
+        // Send to backend endpoint
+        const result = await compressPdfWithBackend(item.file, settings, backendUrl);
+        processedResults.push(result);
+      }
+
+      setResults(processedResults);
+      setStatus('completed');
+    } catch (err) {
+      console.error('Backend compression failed:', err);
+      setStatus('error');
+      setErrorMessage(
+        err.message || 'Failed to connect to the backend compression service.'
+      );
     }
-
-    // Compute savings ratio based on preset
-    let ratio = 0.5; // balanced
-    if (settings.preset === 'extreme') ratio = 0.25; // 75% reduction
-    if (settings.preset === 'minimal') ratio = 0.75; // 25% reduction
-    if (settings.grayscale) ratio *= 0.85;
-
-    const compressedResults = files.map((item) => {
-      const origSize = item.file.size;
-      const compSize = Math.max(1024, Math.round(origSize * ratio));
-      return {
-        name: item.file.name,
-        originalSize: origSize,
-        compressedSize: compSize,
-        blob: item.file,
-      };
-    });
-
-    await new Promise((r) => setTimeout(r, 300));
-    setResults(compressedResults);
-    setStatus('completed');
   };
 
   const handleReset = () => {
     setFiles([]);
     setResults([]);
     setStatus('idle');
-    setProgress(0);
+    setErrorMessage('');
+    setCurrentFileIndex(0);
   };
 
   return (
@@ -121,20 +95,59 @@ export default function App() {
           {/* Hero Section */}
           <div className="text-center max-w-2xl mx-auto mb-10">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-950/40 border border-red-800/40 text-red-400 text-xs font-mono font-semibold mb-4">
-              <Zap className="w-3.5 h-3.5 text-red-500 fill-red-500" />
-              <span>Next-Gen PDF Compression</span>
+              <Server className="w-3.5 h-3.5 text-red-500" />
+              <span>Backend-Powered Architecture</span>
             </div>
 
             <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white mb-4">
-              Compress PDF files without{' '}
+              Compress PDF files with{' '}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-red-400 to-white">
-                losing quality
+                Java Backend
               </span>
             </h1>
 
             <p className="text-sm sm:text-base text-[#a1a1aa] leading-relaxed">
-              Drastically reduce PDF file sizes for email, web, and storage using smart image downsampling and stream compression.
+              Upload your documents and let your Java backend handle heavy PDFBox image downsampling and stream compression.
             </p>
+
+            {/* Backend URL Toggle */}
+            <div className="mt-4 flex items-center justify-center gap-2 text-xs text-[#71717a]">
+              <span>API Endpoint:</span>
+              <code className="text-red-400 font-mono bg-[#14141c] px-2.5 py-1 rounded border border-[#272733]">
+                {backendUrl}
+              </code>
+              <button
+                type="button"
+                onClick={() => setShowServerConfig(!showServerConfig)}
+                className="text-white hover:text-red-400 underline decoration-red-500 ml-1 flex items-center gap-1 cursor-pointer"
+              >
+                <SlidersHorizontal className="w-3 h-3" />
+                <span>{showServerConfig ? 'Hide' : 'Configure'}</span>
+              </button>
+            </div>
+
+            {showServerConfig && (
+              <div className="mt-3 max-w-md mx-auto p-3.5 rounded-xl bg-[#14141c] border border-[#272733] text-left">
+                <label className="block text-xs font-bold text-white mb-1.5 font-mono">
+                  Custom Backend Endpoint URL:
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={backendUrl}
+                    onChange={(e) => setBackendUrl(e.target.value)}
+                    placeholder="http://localhost:8080/api/compress"
+                    className="flex-1 bg-black border border-[#2e2e3e] focus:border-red-500 rounded-lg px-3 py-1.5 text-xs text-white font-mono outline-none"
+                  />
+                  <button
+                    onClick={() => setBackendUrl(DEFAULT_BACKEND_URL)}
+                    className="px-3 py-1.5 rounded-lg bg-[#20202a] text-xs font-semibold hover:bg-[#2b2b38] text-white"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Workflow Container */}
@@ -144,19 +157,6 @@ export default function App() {
             <div className="space-y-6">
               {/* Step 1: Upload */}
               <DropZone onFilesSelected={handleFilesSelected} />
-
-              {/* Sample file trigger */}
-              {files.length === 0 && (
-                <div className="text-center">
-                  <button
-                    onClick={handleLoadSample}
-                    className="inline-flex items-center gap-2 text-xs text-[#a1a1aa] hover:text-white bg-[#14141b] hover:bg-[#1c1c26] border border-[#272733] px-3.5 py-2 rounded-lg transition-all"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-red-500" />
-                    <span>No PDF handy? Try with sample 4.2 MB document</span>
-                  </button>
-                </div>
-              )}
 
               {/* Step 2: Uploaded files list */}
               {files.length > 0 && (
@@ -168,7 +168,7 @@ export default function App() {
 
                     <button
                       onClick={() => setFiles([])}
-                      className="text-xs text-red-400 hover:text-red-300 font-medium"
+                      className="text-xs text-red-400 hover:text-red-300 font-medium cursor-pointer"
                     >
                       Clear all
                     </button>
@@ -201,39 +201,65 @@ export default function App() {
                       className="w-full sm:w-auto inline-flex items-center justify-center gap-3 px-8 py-4 rounded-xl bg-red-600 hover:bg-red-500 active:scale-[0.99] text-white font-extrabold text-base transition-all shadow-xl shadow-red-600/30 group cursor-pointer"
                     >
                       <Zap className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                      <span>Compress {files.length} {files.length === 1 ? 'Document' : 'Documents'} Now</span>
+                      <span>Send to Backend ({files.length} {files.length === 1 ? 'file' : 'files'})</span>
                       <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                     </button>
                   </div>
                 </>
               )}
 
+              {/* Error State */}
+              {status === 'error' && (
+                <div className="p-6 rounded-2xl bg-red-950/30 border border-red-800/60 shadow-xl space-y-4">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-6 h-6 text-red-500 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="text-base font-bold text-white">Backend Connection Error</h4>
+                      <p className="text-xs font-mono text-red-300 mt-1">{errorMessage}</p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-black/50 border border-red-900/40 text-xs text-[#a1a1aa] space-y-2 font-mono">
+                    <span className="text-white font-bold block">💡 How to resolve:</span>
+                    <p>1. Ensure your Java backend is running on <code className="text-red-400">{backendUrl}</code>.</p>
+                    <p>2. Verify that your backend exposes a <code className="text-red-400">POST /api/compress</code> endpoint accepting <code className="text-white">multipart/form-data</code> with field name <code className="text-red-400">file</code>.</p>
+                    <p>3. Enable CORS on the backend for <code className="text-red-400">http://localhost:3000</code>.</p>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={startCompression}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition-all shadow-md shadow-red-600/20 cursor-pointer"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      <span>Retry Request</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Compressing Progress state */}
               {status === 'compressing' && (
                 <div className="bg-[#121217] rounded-2xl border border-red-500/30 p-8 text-center shadow-2xl space-y-5">
                   <div className="inline-flex w-16 h-16 rounded-2xl bg-red-950/40 border border-red-700/50 items-center justify-center text-red-500 shadow-lg shadow-red-600/20">
-                    <Zap className="w-8 h-8 animate-pulse text-red-500" />
+                    <Server className="w-8 h-8 animate-pulse text-red-500" />
                   </div>
 
                   <div>
                     <h3 className="text-xl font-bold text-white tracking-tight">
-                      Compressing PDF Document...
+                      Processing on Backend...
                     </h3>
                     <p className="text-xs font-mono text-red-400 mt-1">
-                      {currentStage}
+                      Sending file {currentFileIndex + 1} of {files.length}: {files[currentFileIndex]?.file?.name}
+                    </p>
+                    <p className="text-xs text-[#71717a] mt-1 font-mono">
+                      Target: {backendUrl}
                     </p>
                   </div>
 
                   <div className="max-w-md mx-auto">
-                    <div className="w-full h-3 rounded-full bg-[#202029] overflow-hidden">
-                      <div
-                        style={{ width: `${progress}%` }}
-                        className="h-full bg-gradient-to-r from-red-600 to-red-400 rounded-full transition-all duration-300 shadow-md shadow-red-500/50"
-                      />
-                    </div>
-                    <div className="flex justify-between text-xs font-mono text-[#71717a] mt-2">
-                      <span>PROCESSING</span>
-                      <span className="text-white font-bold">{progress}%</span>
+                    <div className="w-full h-2 rounded-full bg-[#202029] overflow-hidden">
+                      <div className="h-full bg-red-500 animate-pulse w-full rounded-full" />
                     </div>
                   </div>
                 </div>
@@ -253,7 +279,7 @@ export default function App() {
             <span className="w-2 h-2 rounded-full bg-red-500" />
             <span className="font-mono text-white font-semibold">PDF COMPRESSOR FRONT</span>
             <span>•</span>
-            <span>Crafted with React & Tailwind CSS</span>
+            <span>Client UI for Java Backend</span>
           </div>
           <div>
             <span>Black, White & Red Edition</span>
